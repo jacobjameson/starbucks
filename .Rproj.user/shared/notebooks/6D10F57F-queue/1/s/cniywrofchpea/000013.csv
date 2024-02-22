@@ -1,0 +1,34 @@
+"0","import matplotlib.pyplot as plt"
+"0","import seaborn as sns"
+"0",""
+"0","# 1. Average Order Processing Time"
+"0","results_df['processing_time'] = results_df['make_end'] - results_df['make_start']"
+"0","average_processing_time = results_df['processing_time'].mean()"
+"0","print(f""Average Order Processing Time: {average_processing_time:.2f} minutes"")"
+"1","Average Order Processing Time: 3.58 minutes
+"
+"0","# 2. Order Processing Time by Customer Type"
+"0","average_times_by_type = results_df.groupby('customer_type')['processing_time'].mean()"
+"0","print(average_times_by_type)"
+"1","customer_type
+drive_thru    3.722385
+in_store      3.440471
+Name: processing_time, dtype: float64
+"
+"0",""
+"0","# 3. Order Processing Time Distribution"
+"0","plt.figure(figsize=(10, 6))"
+"0","sns.histplot(data=results_df, x='processing_time', kde=True, hue='customer_type', element='step', stat='density')"
+"1","<Figure size 1000x600 with 0 Axes>
+"
+"0","plt.title('Distribution of Order Processing Times')"
+"1","<Axes: xlabel='processing_time', ylabel='Density'>
+"
+"1","Text(0.5, 1.0, 'Distribution of Order Processing Times')
+"
+"0","plt.xlabel('Processing Time (minutes)')"
+"0","plt.ylabel('Density')"
+"0","plt.show()"
+"1","Text(0.5, 0, 'Processing Time (minutes)')
+Text(0, 0.5, 'Density')
+"

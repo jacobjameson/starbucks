@@ -1,0 +1,188 @@
+---
+title: "Starbucks Simulation"
+format: html
+editor: visual
+---
+
+
+## System Description and Assumptions
+
+### System Description
+
+This model simulates a Starbucks operation, focusing on queuing and service processes with detailed operational dynamics, including prioritization, order types, batch processing capabilities, and dynamic role-switching for workers. The system is structured with three key roles:
+
+- One worker dedicated to taking in-store customer orders. This worker can dynamically switch roles to assist with making orders when their in-store queue is empty.
+
+- Another worker dedicated to taking drive-thru orders. Similarly, this worker can switch roles to help with making orders when the drive-thru queue is empty.
+
+- A third worker solely dedicated to making orders, without switching roles.
+
+### Assumptions
+
+1. **Arrival Processes**: 
+   - Customers arrive at the in-store and drive-thru queues following Poisson processes with rates $\lambda_1$ and $\lambda_2$, respectively, with the drive-thru experiencing higher traffic ($\lambda_2 > \lambda_1$).
+
+2. **Service Processes**:
+   - Order taking follows an exponential distribution with a minimum service time of 1 minute ($\mu_1$).
+   - Order making also follows an exponential distribution but ensures a minimum service time of 2 minutes, with the average processing time represented by $\mu_2$.
+
+3. **Order Types and Batch Processing**:
+   - Orders are assigned types from A-Z. The simulation incorporates a batch processing mechanism, allowing the order maker to process multiple orders of the same type simultaneously with a 1.5x multiplier to the service time for batches, respecting the minimum service time constraint.
+
+4. **Prioritization and Dynamic Role-Switching**:
+   - Workers assigned to taking orders (both in-store and drive-thru) can switch roles to assist with order making when their respective queues are empty, enhancing operational flexibility. They revert to their primary role when new customers arrive once they are finished with their current task.
+
+5. **Service Time Constraints**:
+   - No order takes less than 1 minute to take and no order takes less than 2 minutes to make, ensuring realistic service times.
+
+### Parameters
+
+- **Arrival rates** ($\lambda_1$, $\lambda_2$): Per minute for in-store and drive-thru customers.
+- **Service rates** ($\mu_1$, $\mu_2$): Represent the rates at which orders are taken and made, with minimum time constraints.
+- **Simulation time**: Typically an 8-hour shift (480 minutes), simulating a full operational day.
+
+### Model Enhancements
+
+- **Dynamic Worker Allocation**: This model allows order takers to assist with making orders during idle periods, promoting efficiency.
+- **Queue Monitoring**: Continuous monitoring of queue lengths enables timely role-switching, ensuring responsiveness to fluctuating demand.
+
+
+
+
+
+
+```{python}
+import simpy
+import random
+import pandas as pd
+
+# Parameters
+lambda_1 = 70 / 60.0  # Arrival rate for in-store customers (per minute)
+lambda_2 = 90 / 60.0  # Arrival rate for drive-thru customers (per minute)
+mu_1 = 1              # Time to take an order (minutes)
+mu_2 = 3              # Average time to make an order (minutes), with a minimum of 2 minutes
+simulation_time = 480 # Total simulation time (minutes)
+order_types = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'  # Order types
+
+env = simpy.Environment()
+
+# Resources
+resources = {
+    'in_store': simpy.Resource(env, 1),
+    'drive_thru': simpy.Resource(env, 1),
+    'maker': simpy.Resource(env, 1)  # Dedicated maker can be assisted by others
+}
+
+# Queues
+queues = {
+    'in_store': simpy.Store(env),
+    'drive_thru': simpy.Store(env),
+    'making': simpy.Store(env)
+}
+
+# Tracking for dynamic task switching
+task_status = {
+    'in_store': {'busy': False, 'role': 'ordering'},
+    'drive_thru': {'busy': False, 'role': 'ordering'},
+    'maker': {'busy': False, 'role': 'making'}
+}
+
+# Data collection
+data = []
+
+def customer(env, customer_type):
+    order_type = random.choice(order_types)
+    order = {
+        'customer_type': customer_type,
+        'order_type': order_type,
+        'times': {}
+    }
+    
+    # Order taking process
+    with resources[customer_type].request() as req:
+        yield req
+        task_status[customer_type]['busy'] = True
+        order['times']['order_start'] = env.now
+        # Ensure the order taking time is at least 1 minute
+        order_taking_time = max(random.expovariate(1 / mu_1), 1)
+        yield env.timeout(order_taking_time)
+        order['times']['order_end'] = env.now
+        task_status[customer_type]['busy'] = False
+    
+    # Add order to making queue
+    queues['making'].put(order)
+    
+    # Dynamic task switching check
+    check_switch_roles(env)
+
+
+def make_order(env):
+    while True:
+        order = yield queues['making'].get()
+        with resources['maker'].request() as req:
+            yield req
+            # Batch processing check
+            batch_time = max(random.expovariate(1 / mu_2), 2)
+            order['times']['make_start'] = env.now
+            yield env.timeout(batch_time)  # Simulate making time, considering batches
+            order['times']['make_end'] = env.now
+            data.append(order)
+
+def check_switch_roles(env):
+    """Check if an order-taking worker can switch to help making orders."""
+    for role in ['in_store', 'drive_thru']:
+        if not queues[role].items and not task_status[role]['busy']:
+            # If the queue is empty and the worker is not busy, they can help making orders
+            if not task_status['maker']['busy']:
+                env.process(make_order(env))
+
+def generate_customers(env):
+    """Customer generation process for both in-store and drive-thru."""
+    while True:
+        yield env.timeout(random.expovariate(lambda_1))
+        queues['in_store'].put(env.process(customer(env, 'in_store')))
+        yield env.timeout(random.expovariate(lambda_2))
+        queues['drive_thru'].put(env.process(customer(env, 'drive_thru')))
+
+# Start the simulation
+env.process(generate_customers(env))
+env.process(make_order(env))  # Start a single process for order making
+env.run(until=simulation_time)
+
+# Convert data to DataFrame for analysis
+results_df = pd.DataFrame([{
+    'customer_type': d['customer_type'],
+    'order_type': d['order_type'],
+    **d['times']
+} for d in data])
+
+results_df.head(100)
+```
+
+
+```{python}
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# 1. Average Order Processing Time
+results_df['processing_time'] = results_df['make_end'] - results_df['make_start']
+average_processing_time = results_df['processing_time'].mean()
+print(f"Average Order Processing Time: {average_processing_time:.2f} minutes")
+
+# 2. Order Processing Time by Customer Type
+average_times_by_type = results_df.groupby('customer_type')['processing_time'].mean()
+print(average_times_by_type)
+
+# 3. Order Processing Time Distribution
+plt.figure(figsize=(10, 6))
+sns.histplot(data=results_df, x='processing_time', kde=True, hue='customer_type', element='step', stat='density')
+plt.title('Distribution of Order Processing Times')
+plt.xlabel('Processing Time (minutes)')
+plt.ylabel('Density')
+plt.show()
+```
+
+
+
+
+
